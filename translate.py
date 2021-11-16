@@ -25,7 +25,6 @@ def define_argparser():
         default=-1,
         help='GPU ID to use. -1 for CPU. Default=%(default)s'
     )
-
     p.add_argument(
         '--batch_size',
         type=int,
@@ -54,7 +53,7 @@ def define_argparser():
         '--lang',
         type=str,
         default=None,
-        help='Source language and target language. Example: enko'
+        help='Source language and target language. Example: koen'
     )
     p.add_argument(
         '--length_penalty',
@@ -62,19 +61,29 @@ def define_argparser():
         default=1.2,
         help='Length penalty parameter that higher value produce shorter results. Default=%(default)s',
     )
-
+    p.add_argument(
+        '--infile',
+        type=str,
+        required=True,
+        default=None,
+        help='Input file. Example: test.ko'
+    )
+    p.add_argument(
+        '--outfile',
+        type=str,
+        required=True,
+        default=None,
+        help='Output file. Example: result.txt'
+    )
     config = p.parse_args()
 
     return config
 
 
-def read_text(batch_size=128):
-    # This method gets sentences from standard input and tokenize those.
+def read_text(batch_size=128, infile=None):
     lines = []
-
-    sys.stdin = codecs.getreader("utf-8")(sys.stdin.detach())
-
-    for line in sys.stdin:
+    f_read=open(infile,'rt',encoding='utf-8')
+    for line in f_read:
         if line.strip() != '':
             lines += [line.strip().split(' ')]
 
@@ -84,6 +93,8 @@ def read_text(batch_size=128):
 
     if len(lines) > 0:
         yield lines
+
+    f_read.close()
 
 
 def to_text(indice, vocab):
@@ -173,7 +184,6 @@ def get_model(input_size, output_size, train_config, is_reverse=False):
 
 
 if __name__ == '__main__':
-    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
     config = define_argparser()
 
     # Load saved model.
@@ -186,7 +196,6 @@ if __name__ == '__main__':
     train_config = saved_data['config']
 
     src_vocab, tgt_vocab, is_reverse = get_vocabs(train_config, config, saved_data)
-
     # Initialize dataloader, but we don't need to read training & test corpus.
     # What we need is just load vocabularies from the previously trained model.
     loader = DataLoader()
@@ -199,9 +208,10 @@ if __name__ == '__main__':
     if config.gpu_id >= 0:
         model.cuda(config.gpu_id)
 
+    f_out = open(config.outfile, 'wt', encoding='utf-8')
     with torch.no_grad():
         # Get sentences from standard input.
-        for lines in read_text(batch_size=config.batch_size):
+        for i,lines in enumerate(read_text(batch_size=config.batch_size, infile=config.infile)):
             # Since packed_sequence must be sorted by decreasing order of length,
             # sorting by length in mini-batch should be restored by original order.
             # Therefore, we need to memorize the original index of the sentence.
@@ -233,7 +243,7 @@ if __name__ == '__main__':
                 sorted_tuples = sorted(zip(output, original_indice), key=itemgetter(1))
                 output = [sorted_tuples[i][0] for i in range(len(sorted_tuples))]
 
-                sys.stdout.write('\n'.join(output) + '\n')
+                f_out.write('\n'.join(output) + '\n')
             else:
                 # Take mini-batch parallelized beam search.
                 batch_indice, _ = model.batch_beam_search(
@@ -252,4 +262,7 @@ if __name__ == '__main__':
                 output = [sorted_tuples[i][0] for i in range(len(sorted_tuples))]
 
                 for i in range(len(output)):
-                    sys.stdout.write('\n'.join(output[i]) + '\n')
+                    f_out.write('\n'.join(output[i]) + '\n')
+
+    if f_out is not None:
+        f_out.close()
